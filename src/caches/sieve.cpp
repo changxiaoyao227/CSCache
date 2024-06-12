@@ -2,17 +2,17 @@
 // Created by zhenyus on 11/2/19.
 //
 
-#include "parallel_lru.h"
+#include "sieve.h"
 
-void ParallelLRUCache::hit(lruCacheMapType::const_iterator it) {
-    //typedef std::unordered_map<uint64_t, ListIteratorType> lruCacheMapType; 是这么一个类型，一种map，第二个是ListIteratorType
+void SIEVECache::hit(sieveCacheMapType::const_iterator it) {
+    //typedef std::unordered_map<uint64_t, ListIteratorType> sieveCacheMapType; 是这么一个类型，一种map，第二个是ListIteratorType
     //typedef std::list<uint64_t>::iterator ListIteratorType; 其实是一种list<> 的迭代器
     //是一个list的方法，第一个表示插入的位置迭代器，第二个是要插入的源list，第三个是范围起始，是将B中的C-D插入A的相应位置
     cache_list.splice(cache_list.begin(), cache_list, it->second);
 }
 
 
-void ParallelLRUCache::async_lookup(const uint64_t &key) {
+void SIEVECache::async_lookup(const uint64_t &key) {
     //first update the metadata: insert/update, which can trigger pending data.mature
     auto it = cache_map.find(key);
     if (it != cache_map.end()) {
@@ -20,7 +20,7 @@ void ParallelLRUCache::async_lookup(const uint64_t &key) {
     }
 }
 
-void ParallelLRUCache::async_admit(const uint64_t &key, const int64_t &size,
+void SIEVECache::async_admit(const uint64_t &key, const int64_t &size,
                                    const uint16_t extra_features[max_n_extra_feature]) {
     auto it = cache_map.find(key);
     if (it == cache_map.end()) {
@@ -50,7 +50,7 @@ void ParallelLRUCache::async_admit(const uint64_t &key, const int64_t &size,
     return;
 }
 
-void ParallelLRUCache::evict() {
+void SIEVECache::evict() {
     //list<uint64_t> cache_list; 
     //end得到最后一个的下一个，--到最后一个
     auto lit = --(cache_list.end());

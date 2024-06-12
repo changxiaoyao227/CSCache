@@ -1,5 +1,5 @@
 //
-// Created by zhenyus on 1/16/19.
+// Created by cs on 1/6/24.
 //
 
 #ifndef WEBCACHESIM_LRB_H
@@ -27,7 +27,7 @@ using spp::sparse_hash_map;
 using bsoncxx::builder::basic::kvp;
 using bsoncxx::builder::basic::sub_array;
 
-namespace lrb {
+namespace cs {
     uint32_t current_seq = -1;
     uint8_t max_n_past_timestamps = 32;
     uint8_t max_n_past_distances = 31;
@@ -42,13 +42,6 @@ namespace lrb {
     const uint max_n_extra_feature = 4;
     uint32_t n_feature;
     //TODO: interval clock should tick by event instead of following incoming packet time
-#ifdef EVICTION_LOGGING
-    unordered_map<uint64_t, uint32_t> future_timestamps;
-    int n_logging_start;
-    vector<float> trainings_and_predictions;
-    bool start_train_logging = false;
-    int range_log = 1000000;
-#endif
 
 struct MetaExtra {
     //vector overhead = 24 (8 pointer, 8 size, 8 allocation)
@@ -107,24 +100,9 @@ public:
     MetaExtra *_extra = nullptr;
     //这边有个vector记录采样的时间
     vector<uint32_t> _sample_times;
-#ifdef EVICTION_LOGGING
-    vector<uint32_t> _eviction_sample_times;
-    uint32_t _future_timestamp;
-#endif
 
 
-#ifdef EVICTION_LOGGING
-    Meta(const uint64_t &key, const uint64_t &size, const uint64_t &past_timestamp,
-            const vector<uint16_t> &extra_features, const uint64_t &future_timestamp) {
-        _key = key;
-        _size = size;
-        _past_timestamp = past_timestamp;
-        for (int i = 0; i < n_extra_fields; ++i)
-            _extra_features[i] = extra_features[i];
-        _future_timestamp = future_timestamp;
-    }
 
-#else
     Meta(const uint64_t &key, const uint64_t &size, const uint64_t &past_timestamp,
             const vector<uint16_t> &extra_features) {
     //MetaExtra *_extra = nullptr;
@@ -136,7 +114,6 @@ public:
         for (int i = 0; i < n_extra_fields; ++i)
             _extra_features[i] = extra_features[i];
     }
-#endif
 
     virtual ~Meta() = default;
 
@@ -145,32 +122,12 @@ public:
         _sample_times.emplace_back(sample_t);
     }
 
-#ifdef EVICTION_LOGGING
-    void emplace_eviction_sample(uint32_t &sample_t) {
-        _eviction_sample_times.emplace_back(sample_t);
-    }
-#endif
 
     void free() {
         delete _extra;
     }
 
-#ifdef EVICTION_LOGGING
-
-    void update(const uint32_t &past_timestamp, const uint32_t &future_timestamp) {
-        //distance
-        uint32_t _distance = past_timestamp - _past_timestamp;
-        assert(_distance);
-        if (!_extra) {
-            _extra = new MetaExtra(_distance);
-        } else
-            _extra->update(_distance);
-        //timestamp
-        _past_timestamp = past_timestamp;
-        _future_timestamp = future_timestamp;
-    }
-
-#else//lookup函数中，传进来的是现在的seq
+//lookup函数中，传进来的是现在的seq
     void update(const uint32_t &past_timestamp) {
         //后者是初始化的东西
         //distance
@@ -186,7 +143,7 @@ public:
         //timestamp
         _past_timestamp = past_timestamp;
     }
-#endif
+
 
     int feature_overhead() {
         int ret = sizeof(Meta);
@@ -208,18 +165,7 @@ public:
     list<int64_t>::const_iterator p_last_request;
     //any change to functions?
 
-#ifdef EVICTION_LOGGING
 
-    InCacheMeta(const uint64_t &key,
-                const uint64_t &size,
-                const uint64_t &past_timestamp,
-                const vector<uint16_t> &extra_features,
-                const uint64_t &future_timestamp,
-                const list<KeyT>::const_iterator &it) :
-            Meta(key, size, past_timestamp, extra_features, future_timestamp) {
-        p_last_request = it;
-    };
-#else
     InCacheMeta(const uint64_t &key,
                 const uint64_t &size,
                 const uint64_t &past_timestamp,
@@ -227,7 +173,7 @@ public:
             Meta(key, size, past_timestamp, extra_features) {
         p_last_request = it;
     };
-#endif
+
 
     InCacheMeta(const Meta &meta, const list<int64_t>::const_iterator &it) : Meta(meta) {
         p_last_request = it;
@@ -251,7 +197,6 @@ public:
     }
 
     list<int64_t>::const_iterator re_request(list<int64_t>::const_iterator it) {
-        //这是什么情况。
         if (it != dq.cbegin()) {
             dq.emplace_front(*it);
             dq.erase(it);
@@ -338,30 +283,6 @@ public:
         indptr.push_back(counter);
 
 
-#ifdef EVICTION_LOGGING
-        if ((current_seq >= n_logging_start) && !start_train_logging && (indptr.size() == 2)) {
-            start_train_logging = true;
-        }
-
-        if (start_train_logging) {
-//            training_and_prediction_logic_timestamps.emplace_back(current_seq / 65536);
-            int i = indptr.size() - 2;
-            int current_idx = indptr[i];
-            for (int p = 0; p < n_feature; ++p) {
-                if (p == indices[current_idx]) {
-                    trainings_and_predictions.emplace_back(data[current_idx]);
-                    if (current_idx + 1 < indptr[i + 1])
-                        ++current_idx;
-                } else
-                    trainings_and_predictions.emplace_back(NAN);
-            }
-            trainings_and_predictions.emplace_back(future_interval);
-            trainings_and_predictions.emplace_back(NAN);
-            trainings_and_predictions.emplace_back(sample_timestamp);
-            trainings_and_predictions.emplace_back(0);
-            trainings_and_predictions.emplace_back(key);
-        }
-#endif
 
     }
 
@@ -488,10 +409,10 @@ struct KeyMapEntryT {
     unsigned int list_pos: 31;
 };
 
-class LRBCache : public Cache {
+class CSCache : public Cache {
 public:
     //key -> (0/1 list, idx)
-    sparse_hash_map<uint64_t, KeyMapEntryT> key_map;
+    sparse_hash_map<uint64_t, KeyMapEntryT,uint64_t> key_map;
 //    vector<Meta> meta_holder[2];
     vector<InCacheMeta> in_cache_metas;
     vector<Meta> out_cache_metas;
@@ -499,12 +420,9 @@ public:
     InCacheLRUQueue in_cache_lru_queue;
     shared_ptr<sparse_hash_map<uint64_t, uint64_t>> negative_candidate_queue;
     TrainingData *training_data;
-#ifdef EVICTION_LOGGING
-    LRBEvictionTrainingData *eviction_training_data;
-#endif
 
     // sample_size: use n_memorize keys + random choose (sample_rate - n_memorize) keys
-    uint sample_rate = 64;
+    uint sample_rate = 4;
 
     double training_loss = 0;
     int32_t n_force_eviction = 0;
@@ -550,19 +468,6 @@ public:
     bool is_sampling = false;
 
     uint64_t byte_million_req;
-#ifdef EVICTION_LOGGING
-    vector<uint8_t> eviction_qualities;
-    vector<uint16_t> eviction_logic_timestamps;
-    uint32_t n_req;
-    int64_t n_early_stop = -1;
-//    vector<uint16_t> training_and_prediction_logic_timestamps;
-    string task_id;
-    string dburi;
-    uint64_t belady_boundary;
-    vector<int64_t> near_bytes;
-    vector<int64_t> middle_bytes;
-    vector<int64_t> far_bytes;
-#endif
 
     void init_with_params(const map<string, string> &params) override {
         //set params
@@ -587,20 +492,6 @@ public:
                 training_params["num_leaves"] = it.second;
             } else if (it.first == "byte_million_req") {
                 byte_million_req = stoull(it.second);
-#ifdef EVICTION_LOGGING
-                } else if (it.first == "n_early_stop") {
-                    n_early_stop = stoll((it.second));
-                } else if (it.first == "n_req") {
-                    n_req = stoull(it.second);
-                } else if (it.first == "dburi") {
-                    dburi = it.second;
-                } else if (it.first == "task_id") {
-                    task_id = it.second;
-                } else if (it.first == "belady_boundary") {
-                    belady_boundary = stoll(it.second);
-                } else if (it.first == "range_log") {
-                    range_log = stoi(it.second);
-#endif
             } else if (it.first == "n_edc_feature") {
                 if (stoull(it.second) != n_edc_feature) {
                     cerr << "error: cannot change n_edc_feature because of const" << endl;
@@ -617,7 +508,7 @@ public:
                     exit(-1);
                 }
             } else {
-                cerr << "LRB unrecognized parameter: " << it.first << endl;
+                cerr << "CS  unrecognized parameter: " << it.first << endl;
             }
         }
         //构建memory_window（很多个）sparse_hash_map
@@ -650,18 +541,7 @@ public:
         //can set number of threads, however the inference time will increase a lot (2x~3x) if use 1 thread
 //        inference_params["num_threads"] = "4";
         training_data = new TrainingData();
-#ifdef EVICTION_LOGGING
-        eviction_training_data = new LRBEvictionTrainingData();
-#endif
 
-#ifdef EVICTION_LOGGING
-        //logging the training and inference happened in the last 1 million
-        if (n_early_stop < 0) {
-            n_logging_start = n_req < range_log ? 0 : n_req - range_log;
-        } else {
-            n_logging_start = n_early_stop < range_log ? 0 : n_early_stop - range_log;
-        }
-#endif
     }
 
     bool lookup(const SimpleRequest &req) override;
@@ -766,46 +646,6 @@ public:
             for (const auto &element : segment_positive_example_ratio)
                 child.append(element);
         }));
-#ifdef EVICTION_LOGGING
-        doc.append(kvp("near_bytes", [this](sub_array child) {
-            for (const auto &element : near_bytes)
-                child.append(element);
-        }));
-        doc.append(kvp("middle_bytes", [this](sub_array child) {
-            for (const auto &element : middle_bytes)
-                child.append(element);
-        }));
-        doc.append(kvp("far_bytes", [this](sub_array child) {
-            for (const auto &element : far_bytes)
-                child.append(element);
-        }));
-        try {
-            mongocxx::client client = mongocxx::client{mongocxx::uri(dburi)};
-            auto db = client[mongocxx::uri(dburi).database()];
-            auto bucket = db.gridfs_bucket();
-
-            auto uploader = bucket.open_upload_stream(task_id + ".evictions");
-            for (auto &b: eviction_qualities)
-                uploader.write((uint8_t *) (&b), sizeof(uint8_t));
-            uploader.close();
-            uploader = bucket.open_upload_stream(task_id + ".eviction_timestamps");
-            for (auto &b: eviction_logic_timestamps)
-                uploader.write((uint8_t *) (&b), sizeof(uint16_t));
-            uploader.close();
-            uploader = bucket.open_upload_stream(task_id + ".trainings_and_predictions");
-            for (auto &b: trainings_and_predictions)
-                uploader.write((uint8_t *) (&b), sizeof(float));
-            uploader.close();
-//            uploader = bucket.open_upload_stream(task_id + ".training_and_prediction_timestamps");
-//            for (auto &b: training_and_prediction_logic_timestamps)
-//                uploader.write((uint8_t *) (&b), sizeof(uint16_t));
-//            uploader.close();
-        } catch (const std::exception &xcp) {
-            cerr << "error: db connection failed: " << xcp.what() << std::endl;
-            //continue to upload the simulation summaries
-//            abort();
-        }
-#endif
     }
 
     vector<int> get_object_distribution_n_past_timestamps() {
@@ -829,7 +669,7 @@ public:
 
 };
 
-static Factory<LRBCache> factoryLRB("LRB");
+static Factory<CSCache> factoryCS("CS");
 
 }
-#endif //WEBCACHESIM_LRB_H
+#endif //WEBCACHESIM_CS_H

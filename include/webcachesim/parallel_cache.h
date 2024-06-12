@@ -50,6 +50,7 @@ namespace webcachesim {
         }
 
         void admit(const SimpleRequest &req) override {
+            //外界调用admit会转移到parallel_admit 这里扔掉了当前的seq
             int64_t size = req.size;
             parallel_admit(req.id, size, req.extra_features.data());
         }
@@ -63,9 +64,13 @@ namespace webcachesim {
         //the client call this, expecting fast return
         virtual void parallel_admit
                 (const uint64_t &key, const int64_t &size, const uint16_t extra_features[max_n_extra_feature]) {
+            //这里是在cache.h中的_cachesize 通过开始的set设置初值
             if (size > _cacheSize)
                 return;
             auto shard_id = key%n_shard;
+            //开始的时候定义了       shared_mutex size_map_mutex[n_shard];
+            //上锁的意思
+            //sparse_hash_map<uint64_t, uint64_t> size_map[n_shard];
             size_map_mutex[shard_id].lock_shared();
             auto it = size_map[shard_id].find(key);
             if (it == size_map[shard_id].end() || !(it->second)) {

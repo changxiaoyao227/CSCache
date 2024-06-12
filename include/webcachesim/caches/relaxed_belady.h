@@ -69,6 +69,7 @@ public:
     uint64_t belady_boundary = 10000000;
 
     default_random_engine _generator = default_random_engine();
+    //一个均匀分布随机生成器. 随机数类型是size_t 为无符号整数.
     uniform_int_distribution<std::size_t> _distribution = uniform_int_distribution<std::size_t>();
     uint64_t current_t;
 
@@ -151,11 +152,14 @@ public:
 #endif
 
     void beyond_meta_remove_and_append(const uint32_t &pos) {
+        //先驱逐pos对应的meta数据
         auto &meta = beyond_boundary_meta[pos];
+        //通过meta的key找到对应的keymap中的迭代器unordered_map<int64_t, pair<MetaT, uint32_t >>
         auto it = key_map.find(meta._key);
+        //it的逆转一下.从不在边界变成在边界内.
         it->second.first = static_cast<MetaT>(!(it->second.first));
         within_boundary_meta.emplace(meta._future_timestamp, pair(meta._key, meta._size));
-
+        
         auto old_tail_idx = beyond_boundary_meta.size() - 1;
         if (pos != old_tail_idx) {
             //move tail

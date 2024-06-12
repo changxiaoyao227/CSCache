@@ -48,6 +48,7 @@ struct ParalllelLRBMetaExtra {
     //164 byte at most
     //not 1 hit wonder
     float _edc[10];
+    //deltas
     vector<uint32_t> _past_distances;
     //the next index to put the distance
     uint8_t _past_distance_idx = 1;
@@ -434,8 +435,7 @@ public:
 
     void async_lookup(const uint64_t &key) override;
 
-    void
-    async_admit(const uint64_t &key, const int64_t &size, const uint16_t extra_features[max_n_extra_feature]) override;
+    void async_admit(const uint64_t &key, const int64_t &size, const uint16_t extra_features[max_n_extra_feature]) override;
 
 
     void evict();

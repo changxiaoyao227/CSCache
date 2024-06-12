@@ -1,5 +1,5 @@
 message(${WEBCACHESIM_HEADER_DIR})
-
+set(CMAKE_PREFIX_PATH "/public/home/detian/cs/webcachesim/")
 set(LIB_SOURCE
         ${WEBCACHESIM_HEADER_DIR}/utils.h
         ${WEBCACHESIM_HEADER_DIR}/file_hash.h
@@ -41,6 +41,8 @@ set(LIB_SOURCE
         caches/belady_sample.cpp
         ${WEBCACHESIM_HEADER_DIR}/caches/lrb.h
         caches/lrb.cpp
+        ${WEBCACHESIM_HEADER_DIR}/caches/cs.h
+        caches/cs.cpp
         ${WEBCACHESIM_HEADER_DIR}/caches/hyperbolic.h
         caches/hyperbolic.cpp
         ${WEBCACHESIM_HEADER_DIR}/caches/lecar.h

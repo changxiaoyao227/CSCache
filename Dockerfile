@@ -11,8 +11,8 @@ ENV WEBCACHESIM_ROOT=/opt/webcachesim
 WORKDIR ${WEBCACHESIM_ROOT}
 
 RUN apt-get update && apt-get install -y git sudo 
-RUN git clone --recurse-submodules https://github.com/changxiaoyao227/CSCache.git .
-RUN bash ./scripts/install.sh
+COPY /webcachesim .
+RUN bash /scripts/install.sh
 
 ENV WEBCACHESIM_TRACE_DIR=/trace
 ENTRYPOINT ["/opt/webcachesim/build/bin/webcachesim_cli"]

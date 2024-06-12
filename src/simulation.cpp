@@ -26,6 +26,7 @@ FrameWork::FrameWork(const string &trace_file, const string &cache_type, const u
     _trace_file = trace_file;
     _cache_type = cache_type;
     _cache_size = cache_size;
+    //是这些算法即为{"Belady", "BeladySample", "RelaxedBelady", "BinaryRelaxedBelady","PercentRelaxedBelady"};offline算法
     is_offline = offline_algorithms.count(_cache_type);
 
     for (auto it = params.cbegin(); it != params.cend();) {
@@ -45,12 +46,14 @@ FrameWork::FrameWork(const string &trace_file, const string &cache_type, const u
             bloom_filter = static_cast<bool>(stoi(it->second));
             it = params.erase(it);
         } else if (it->first == "segment_window") {
+            //初始值1000000
             segment_window = stoull((it->second));
             ++it;
         } else if (it->first == "n_extra_fields") {
             n_extra_fields = stoi((it->second));
             ++it;
         } else if (it->first == "real_time_segment_window") {
+            //初始值为600 单位据说是second
             real_time_segment_window = stoull((it->second));
             it = params.erase(it);
         } else if (it->first == "n_early_stop") {
@@ -90,6 +93,7 @@ FrameWork::FrameWork(const string &trace_file, const string &cache_type, const u
     webcache->init_with_params(params);
 
     adjust_real_time_offset();
+    //n_extra_fields 是容器vector<uint16_t> 的容量
     extra_features = vector<uint16_t>(n_extra_fields);
 }
 
@@ -116,6 +120,7 @@ void FrameWork::update_real_time_stats() {
     //real time only read rss info
     auto metadata_overhead = get_rss();
     rt_seg_rss.emplace_back(metadata_overhead);
+    //移到下一个窗口，oh，yes，那句代码的意思就是，现在req的时间超过了现在的windows边界，记录一下这个windows中byte和obj的miss和req的情况，重设一下。
     time_window_end += real_time_segment_window;
 }
 
@@ -140,7 +145,8 @@ void FrameWork::update_stats() {
     if (is_metadata_in_cache_size) {
         webcache->setSize(_cache_size - metadata_overhead);
     }
-    cerr << "rss: " << metadata_overhead << endl;
+    cerr << "RSS/metadate overhead: " << metadata_overhead << endl;
+    //这边是针对部分实现了该虚函数的算法类，可以计算其是否超出了边界，见relaxed_belady中的函数
     webcache->update_stat_periodic();
 }
 
@@ -150,6 +156,7 @@ bsoncxx::builder::basic::document FrameWork::simulate() {
     unordered_map<uint64_t, uint32_t> future_timestamps;
     vector<uint8_t> eviction_qualities;
     vector<uint16_t> eviction_logic_timestamps;
+    //参数里是否有bloom filter来判断 在init时候就有 大部分应该都没有
     if (bloom_filter) {
         filter = new AkamaiBloomFilter;
     }
@@ -170,33 +177,42 @@ bsoncxx::builder::basic::document FrameWork::simulate() {
             if (!(infile >> t >> id >> size))
                 break;
         }
-
+    //这里的seq start也是初始的
         if (seq_start_counter++ < seq_start) {
             continue;
         }
+    //也是 要通过parm参数初始化的
         if (seq == n_early_stop)
             break;
-
+    //n_extra_fields 是拥有的数量
         for (int i = 0; i < n_extra_fields; ++i)
             infile >> extra_features[i];
+    //也是初始化的大小
         if (uni_size)
             size = 1;
-
+    //后来计算出来的，是第几个real_time_segment_window的结尾，比如第1个窗口结尾是600.
         while (t >= time_window_end) {
+    //做了什么呢，要去看看 while表示，可能跨越了不止一个窗口，做了一个很大的跃迁。
             update_real_time_stats();
+
         }
+    //除了0以外的segment_window整数倍，都输出一下当前的情况，也就是输出窗口中的那一串
         if (seq && !(seq % segment_window)) {
             update_stats();
         }
-
+//#define update_metric_req(byte_metric, object_metric, size) \
+//    {byte_metric += size; ++object_metric;}
+// 有点怪，大概就是把C加到A上，B自增一下。其中byte_req，obj_req在更新后设置为了0 size是读入的req的大小
+// 就是初始化一下byte_req，obj_req
         update_metric_req(byte_req, obj_req, size);
         update_metric_req(rt_byte_req, rt_obj_req, size)
 
         if (is_offline)
             dynamic_cast<AnnotatedRequest *>(req)->reinit(seq, id, size, next_seq, &extra_features);
         else
+//俺们只看在线算法的一些。req是一开始创建的simplereq000对象。再初始化一下。
             req->reinit(seq, id, size, &extra_features);
-
+//新定义了一个变量
         bool is_admitting = true;
         if (true == bloom_filter) {
             bool exist_in_cache = webcache->exist(req->id);
@@ -206,18 +222,22 @@ bsoncxx::builder::basic::document FrameWork::simulate() {
             }
         }
         if (is_admitting) {
+            //webcache中访问了！lookup函数，传入了一个simplereq对象。返回一个bool值
             bool is_hit = webcache->lookup(*req);
             if (!is_hit) {
+            //如果miss了
                 update_metric_req(byte_miss, obj_miss, size);
                 update_metric_req(rt_byte_miss, rt_obj_miss, size)
                 webcache->admit(*req);
             }
-        } else {
+        }//这边其实针对的是如果没有被admit 
+        else {
             update_metric_req(byte_miss, obj_miss, size);
             update_metric_req(rt_byte_miss, rt_obj_miss, size)
         }
-
+    //计数下一次
         ++seq;
+    //这是一个while true循环，直到读完req结束
     }
     delete req;
     //for the residue segment of trace
@@ -303,11 +323,12 @@ bsoncxx::builder::basic::document simulation(string trace_file, string cache_typ
     int n_extra_fields = get_n_fields(trace_file) - 3;
     params["n_extra_fields"] = to_string(n_extra_fields);
 
-    bool enable_trace_format_check = true;
+    bool enable_trace_format_check = false;
     if (params.find("enable_trace_format_check") != params.end()) {
         enable_trace_format_check = stoi(params.find("enable_trace_format_check")->second);
     }
-
+    enable_trace_format_check = false;
+/*
     if (true == enable_trace_format_check) {
         auto if_pass = trace_sanity_check(trace_file, params);
         if (true == if_pass) {
@@ -316,7 +337,7 @@ bsoncxx::builder::basic::document simulation(string trace_file, string cache_typ
             throw std::runtime_error("fail sanity check");
         }
     }
-
+*/
     if (cache_type == "Adaptive-TinyLFU")
         return _simulation_tinylfu(trace_file, cache_type, cache_size, params);
     else

@@ -16,6 +16,7 @@ using namespace std;
 
 
 typedef std::list<uint64_t>::iterator ListIteratorType;
+//ListIteratorType 是一个list的迭代器类型
 typedef std::unordered_map<uint64_t, ListIteratorType> lruCacheMapType;
 
 class ParallelLRUCache : public ParallelCache {
